@@ -46,7 +46,7 @@ let fileObj: MessagesDB = {
   messages: [],
 };
 
-let markovDB: MessageRecord[] = [];
+let markovDB: MessageRecord[];
 let messageCache: MessageRecord[] = [];
 let deletionCache: string[] = [];
 let markovOpts: MarkovConstructorOptions = {
@@ -172,18 +172,20 @@ function validateMessage(message: Discord.Message): string | null {
   const thisPrefix = messageText.substring(0, PREFIX.length);
   if (thisPrefix === PREFIX) {
     const split = messageText.split(' ');
-    if (split[0] === PREFIX && split.length === 1) {
-      command = 'respond';
-    } else if (split[1] === 'train') {
-      command = 'train';
-    } else if (split[1] === 'help') {
-      command = 'help';
-    } else if (split[1] === 'regen') {
-      command = 'regen';
-    } else if (split[1] === 'debug') {
-      command = 'debug';
-    } else if (split[1] === 'tts') {
-      command = 'tts';
+    if (split[0] === PREFIX) {
+      if (split.length === 1) {
+        command = 'respond';
+      } else if (split[1] === 'train') {
+        command = 'train';
+      } else if (split[1] === 'help') {
+        command = 'help';
+      } else if (split[1] === 'regen') {
+        command = 'regen';
+      } else if (split[1] === 'debug') {
+        command = 'debug';
+      } else if (split[1] === 'tts') {
+        command = 'tts';
+      }
     }
   }
   return command;
@@ -264,6 +266,8 @@ function generateResponse(message: Discord.Message, debug = false, tts = message
       messageOpts.files = [randomRefAttachment];
     } else {
       const randomMessage = markovDB[Math.floor(Math.random() * markovDB.length)];
+      console.log(randomMessage);
+      console.log(markovDB.length);
       if (randomMessage.attachment) {
         messageOpts.files = [{ attachment: randomMessage.attachment }];
       }
@@ -287,6 +291,10 @@ client.on('ready', () => {
   if (fs.existsSync('config/markov.json')) {
     const markovFile = JSON.parse(fs.readFileSync('config/markov.json', 'utf-8'));
     fsMarkov.import(markovFile);
+  }
+  if (fs.existsSync('config/markovDB.json')) {
+    const markov = JSON.parse(fs.readFileSync('config/markovDB.json', 'utf-8'));
+    markovDB = uniqueBy<MessageRecord>(markov.messages, 'id');
   }
 });
 
