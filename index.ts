@@ -1,17 +1,11 @@
-/* eslint-disable no-console */
 import 'source-map-support/register';
 import * as Discord from 'discord.js';
-// https://discord.js.org/#/docs/main/stable/general/welcome
 import * as fs from 'fs';
-
 import Markov, {
   MarkovGenerateOptions,
   MarkovResult,
-  MarkovConstructorOptions,
-  MarkovImportExport,
+  MarkovConstructorOptions
 } from 'markov-strings';
-
-import * as schedule from 'node-schedule';
 
 interface MessageRecord {
   id: string;
@@ -37,23 +31,16 @@ interface MarkbotConfig {
   role?: string;
 }
 
-const version: string = JSON.parse(fs.readFileSync('./package.json', 'utf8')).version || '0.0.0';
-
 const client = new Discord.Client();
-// const ZEROWIDTH_SPACE = String.fromCharCode(parseInt('200B', 16));
-// const MAXMESSAGELENGTH = 2000;
-
 const PAGE_SIZE = 100;
-// let guilds = [];
-// let connected = -1;
-let GAME = '!mark help';
+let GAME = '~cotoiu help';
 let ROLE: string | null;
-let PREFIX = '!mark';
-let STATE_SIZE = 2; // Value of 1 to 3, based on corpus quality
-let MAX_TRIES = 1000;
-let MIN_SCORE = 10;
-const inviteCmd = 'invite';
+let PREFIX = '~cotoiu';
+let STATE_SIZE = 2;
+let MAX_TRIES = 2000;
+let MIN_SCORE = 20;
 const errors: string[] = [];
+const fsMarkov = new Markov({stateSize: 1});
 
 let fileObj: MessagesDB = {
   messages: [],
@@ -66,7 +53,6 @@ let markovOpts: MarkovConstructorOptions = {
   stateSize: STATE_SIZE,
 };
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function uniqueBy<Record extends { [key: string]: any }>(
   arr: Record[],
   propertyName: keyof Record
@@ -104,19 +90,15 @@ function regenMarkov(): void {
       ],
     };
   }
-  // console.log("MessageCache", messageCache)
   markovDB = fileObj.messages;
   markovDB = uniqueBy<MessageRecord>(markovDB.concat(messageCache), 'id');
   deletionCache.forEach(id => {
     const removeIndex = markovDB.map(item => item.id).indexOf(id);
-    // console.log('Remove Index:', removeIndex)
     markovDB.splice(removeIndex, 1);
   });
   deletionCache = [];
   const markov = new Markov(markovOpts);
   fileObj.messages = markovDB;
-  // console.log("WRITING THE FOLLOWING DATA:")
-  // console.log(fileObj)
   fs.writeFileSync('config/markovDB.json', JSON.stringify(fileObj), 'utf-8');
   fileObj.messages = [];
   messageCache = [];
@@ -129,7 +111,6 @@ function regenMarkov(): void {
  * Loads the config settings from disk
  */
 function loadConfig(): void {
-  // Move config if in legacy location
   if (fs.existsSync('./config.json')) {
     console.log('Copying config.json to new location in ./config');
     fs.renameSync('./config.json', './config/config.json');
@@ -140,11 +121,18 @@ function loadConfig(): void {
     fs.renameSync('./markovDB.json', './config/markovDB.json');
   }
 
+  if (!fs.existsSync('./config/markov.json')) {
+    console.log('Corpus missing, generating in ./config');
+    regenMarkov();
+    const markovFile = JSON.parse(fs.readFileSync('config/markov.json', 'utf-8'));
+    fsMarkov.import(markovFile);
+  }
+
   let token = 'missing';
   try {
     const cfg: MarkbotConfig = JSON.parse(fs.readFileSync('./config/config.json', 'utf8'));
-    PREFIX = cfg.prefix || '!mark';
-    GAME = cfg.game || '!mark help';
+    PREFIX = cfg.prefix || '~cotoiu';
+    GAME = cfg.game || '~cotoiu help';
     token = cfg.token || process.env.TOKEN || token;
     STATE_SIZE = cfg.stateSize || STATE_SIZE;
     MIN_SCORE = cfg.minScore || MIN_SCORE;
@@ -170,13 +158,7 @@ function loadConfig(): void {
  * @return {Boolean} True if the sender is a moderator.
  */
 function isModerator(member: Discord.GuildMember): boolean {
-  return (
-    member.hasPermission('ADMINISTRATOR') ||
-    member.hasPermission('MANAGE_CHANNELS') ||
-    member.hasPermission('KICK_MEMBERS') ||
-    member.hasPermission('MOVE_MEMBERS') ||
-    member.id === '82684276755136512' // charlocharlie#8095
-  );
+  return member.hasPermission('ADMINISTRATOR');
 }
 
 /**
@@ -198,8 +180,6 @@ function validateMessage(message: Discord.Message): string | null {
       command = 'help';
     } else if (split[1] === 'regen') {
       command = 'regen';
-    } else if (split[1] === 'invite') {
-      command = 'invite';
     } else if (split[1] === 'debug') {
       command = 'debug';
     } else if (split[1] === 'tts') {
@@ -219,16 +199,17 @@ async function fetchMessages(message: Discord.Message): Promise<void> {
   let historyCache: MessageRecord[] = [];
   let keepGoing = true;
   let oldestMessageID: string | undefined;
+  let batchNr = 0;
 
   while (keepGoing) {
     const messages: Discord.Collection<
       string,
       Discord.Message
-      // eslint-disable-next-line no-await-in-loop
     > = await message.channel.messages.fetch({
       before: oldestMessageID,
       limit: PAGE_SIZE,
     });
+    console.log(batchNr++);
     const nonBotMessageFormatted = messages
       .filter(elem => !elem.author.bot)
       .map(elem => {
@@ -271,12 +252,6 @@ function generateResponse(message: Discord.Message, debug = false, tts = message
     maxTries: MAX_TRIES,
   };
 
-  const fsMarkov = new Markov();
-  const markovFile = JSON.parse(
-    fs.readFileSync('config/markov.json', 'utf-8')
-  ) as MarkovImportExport;
-  fsMarkov.import(markovFile);
-
   try {
     const myResult = fsMarkov.generate(options) as MarkbotMarkovResult;
     console.log('Generated Result:', myResult);
@@ -294,7 +269,8 @@ function generateResponse(message: Discord.Message, debug = false, tts = message
       }
     }
 
-    myResult.string = myResult.string.replace(/@everyone/g, '@everyοne'); // Replace @everyone with a homoglyph 'o'
+    myResult.string = myResult.string.replace(/@everyone/g, 'everyone');
+    myResult.string = myResult.string.replace(/@here/g, 'here');
     message.channel.send(myResult.string, messageOpts);
     if (debug) message.channel.send(`\`\`\`\n${JSON.stringify(myResult, null, 2)}\n\`\`\``);
   } catch (err) {
@@ -307,9 +283,11 @@ function generateResponse(message: Discord.Message, debug = false, tts = message
 }
 
 client.on('ready', () => {
-  console.log('Markbot by Charlie Laabs');
   if (client.user) client.user.setActivity(GAME);
-  regenMarkov();
+  if (fs.existsSync('config/markov.json')) {
+    const markovFile = JSON.parse(fs.readFileSync('config/markov.json', 'utf-8'));
+    fsMarkov.import(markovFile);
+  }
 });
 
 client.on('error', err => {
@@ -333,27 +311,21 @@ client.on('message', message => {
         .setThumbnail(avatarURL as string)
         .setDescription('A Markov chain chatbot that speaks based on previous chat input.')
         .addField(
-          '!mark',
+          '~cotoiu',
           'Generates a sentence to say based on the chat database. Send your ' +
             'message as TTS to recieve it as TTS.'
         )
         .addField(
-          '!mark train',
+          '~cotoiu train',
           'Fetches the maximum amount of previous messages in the current ' +
             'text channel, adds it to the database, and regenerates the corpus. Takes some time.'
         )
         .addField(
-          '!mark regen',
+          '~cotoiu regen',
           'Manually regenerates the corpus to add recent chat info. Run ' +
             'this before shutting down to avoid any data loss. This automatically runs at midnight.'
         )
-        .addField(
-          '!mark invite',
-          "Don't invite this bot to other servers. The database is shared " +
-            'between all servers and text channels.'
-        )
-        .addField('!mark debug', 'Runs the !mark command and follows it up with debug info.')
-        .setFooter(`Markov Discord v${version} by Charlie Laabs`);
+        .addField('~cotoiu debug', 'Runs the ~cotoiu command and follows it up with debug info.');
       message.channel.send(richem).catch(() => {
         message.author.send(richem);
       });
@@ -404,28 +376,12 @@ client.on('message', message => {
         }
       }
     }
-    if (command === inviteCmd) {
-      const avatarURL = client.user?.avatarURL() || undefined;
-      const richem = new Discord.MessageEmbed()
-        .setAuthor(`Invite ${client.user?.username}`, avatarURL)
-        .setThumbnail(avatarURL as string)
-        .addField(
-          'Invite',
-          `[Invite ${client.user?.username} to your server](https://discordapp.com/oauth2/authorize?client_id=${client.user?.id}&scope=bot)`
-        );
-
-      message.channel.send(richem).catch(() => {
-        message.author.send(richem);
-      });
-    }
   }
 });
 
 client.on('messageDelete', message => {
-  // console.log('Adding message ' + message.id + ' to deletion cache.')
   deletionCache.push(message.id);
   console.log('deletionCache:', deletionCache);
 });
 
 loadConfig();
-schedule.scheduleJob('0 4 * * *', () => regenMarkov());
